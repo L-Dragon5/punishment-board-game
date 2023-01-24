@@ -1,4 +1,3 @@
-import { DeleteIcon } from '@chakra-ui/icons';
 import {
   Box,
   Button,
@@ -10,56 +9,115 @@ import {
   FormHelperText,
   FormLabel,
   Heading,
-  IconButton,
   Input,
-  ListItem,
+  OrderedList,
   SimpleGrid,
   Square,
   Text,
-  UnorderedList,
   useDisclosure,
   useToast,
   VStack,
 } from '@chakra-ui/react';
+import {
+  closestCenter,
+  DndContext, 
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import React, { useEffect, useRef, useState } from 'react';
 
+import { SortableSpace } from './SortableSpace';
+
 function App() {
-  const [spaceInput, setSpaceInput] = useState('');
+  const [spaceInput, setSpaceInput] = useState(''); // Input for adding a space.
   const [allSpaces, setAllSpaces] = useState(
     localStorage.getItem('allSpaces')
       ? JSON.parse(localStorage.getItem('allSpaces'))
       : [],
-  );
-  const [startGame, setStartGame] = useState(false);
-  const [splitValue, setSplitValue] = useState(0);
-  const [gameName, setGameName] = useState('');
-  const [boardRoll, setBoardRoll] = useState(0);
-  const [boardPosition, setBoardPosition] = useState(0);
+  ); // All board spaces.
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  ); // Sensors for board spaces drag-and-drop.
 
-  const formRef = useRef();
+  const [startGame, setStartGame] = useState(false); // Editor vs Display flag.
+  const [splitValue, setSplitValue] = useState(0); // How many spaces on each side of square.
+  const [gameName, setGameName] = useState(''); // Board name in center.
+  const [boardRoll, setBoardRoll] = useState(0); // "Dice" roll.
+  const [boardPosition, setBoardPosition] = useState(0); // Position on board/array
+
+  const formRef = useRef(); // Form ref used for reset.
 
   const toast = useToast();
-  const { isOpen, onOpen, onClose } = useDisclosure();
+  const { isOpen, onOpen, onClose } = useDisclosure(); // "Dice" roll fade.
 
+  // Generate a "dice" roll, random int, min-max included.
   function randomIntFromInterval(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
   }
 
+  // Handle adding board space.
   function handleSpaceAdd(e) {
     e.preventDefault();
+    if (spaceInput === '' || spaceInput.length < 1) {
+      toast({
+        title: 'Board Space Input',
+        description: 'Need to input a value',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    } else if (allSpaces.includes(spaceInput)) {
+      toast({
+        title: 'Board Space Input',
+        description: 'Board space already exists',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+
     setAllSpaces((prevState) => [...prevState, spaceInput]);
     formRef.current.reset();
   }
 
-  function handleSpaceDelete(findIndex) {
+  // Handle deleting board space.
+  function handleSpaceDelete(space) {
     setAllSpaces((prevState) =>
-      prevState.filter((value, index) => index !== findIndex),
+      prevState.filter((value) => value !== space),
     );
   }
 
+  // Handle moving board space in list.
+  function handleDragEnd(e) {
+    const { active, over } = e;
+
+    if (active.id !== over.id) {
+      setAllSpaces((prevState) => {
+        const oldIndex = prevState.indexOf(active.id);
+        const newIndex = prevState.indexOf(over.id);
+        return arrayMove(prevState, oldIndex, newIndex);
+      })
+    }
+  }
+
+  // Handle switch from editor to display.
   function handleGameStart(e) {
     e.preventDefault();
 
+    // Check to make sure board spaces exist and are evenly placeable.
     if (allSpaces.length < 1) {
       toast({
         title: 'Game Start Error',
@@ -96,6 +154,7 @@ function App() {
     setStartGame(true);
   }
 
+  // "Roll Dice"
   function handleRoll(e) {
     e.preventDefault();
     const value = randomIntFromInterval(1, allSpaces.length <= 12 ? 3 : 6);
@@ -107,6 +166,7 @@ function App() {
     onOpen();
   }
 
+  // Whenever space list gets changed, store to local storage.
   useEffect(() => {
     if (!startGame) {
       localStorage.setItem('allSpaces', JSON.stringify(allSpaces));
@@ -214,33 +274,30 @@ function App() {
             })}
           </Box>
         ) : (
+          <>
           <Container background="white" maxW="container.lg" p={6} boxShadow="lg">
             <Heading textAlign="center" mb={6}>Punishment Board Layout Generator</Heading>
             <SimpleGrid columns={2} spacing={10}>
               <VStack ref={formRef} as="form" onSubmit={handleSpaceAdd}>
-                <FormControl id="space-name">
+                <FormControl id="space-name" isRequired>
                   <FormLabel>Enter Board Space Name</FormLabel>
                   <Input onChange={(e) => setSpaceInput(e.target.value)} />
                   <FormHelperText>
-                    Place in order from top left going clockwise
+                    Place in order from top left going clockwise. You can drag-and-drop the list items to change the order.
                   </FormHelperText>
                 </FormControl>
                 <Button type="submit" colorScheme="orange">
                   Add Space
                 </Button>
-                <UnorderedList>
-                  {allSpaces.map((space, index) => (
-                    <ListItem key={space}>
-                      <IconButton
-                        aria-label={`Delete ${space}`}
-                        icon={<DeleteIcon />}
-                        onClick={() => handleSpaceDelete(index)}
-                        mr={4}
-                      />
-                      {space}
-                    </ListItem>
-                  ))}
-                </UnorderedList>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToVerticalAxis]}>
+                  <SortableContext items={allSpaces} strategy={verticalListSortingStrategy}>
+                    <OrderedList>
+                      {allSpaces.map((space) => (
+                        <SortableSpace key={space} id={space} handleDelete={handleSpaceDelete} />
+                      ))}
+                    </OrderedList>
+                  </SortableContext>
+                </DndContext>
               </VStack>
 
               <VStack as="form" onSubmit={handleGameStart}>
@@ -270,6 +327,10 @@ function App() {
               </VStack>
             </SimpleGrid>
           </Container>
+          <Box position="fixed" bottom="0" left="50%">
+            <Text size="xs">Built by L-Dragon#0555</Text>
+          </Box>
+          </>
         )}
       </Flex>
     </ChakraProvider>
